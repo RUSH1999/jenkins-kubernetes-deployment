@@ -1,40 +1,42 @@
 pipeline {
-  environment {
-    dockerimagename = "rupeshyad27/react-app"
-    dockerImage = ""
-  }
   agent any
+
+  environment {
+    IMAGE_NAME = "rupeshyad27/react-app"
+    IMAGE_TAG = "latest"
+    FULL_IMAGE = "rupeshyad27/react-app:latest"
+  }
+
   stages {
+
     stage('Checkout Source') {
       steps {
         git branch: 'main',
             url: 'https://github.com/RUSH1999/jenkins-kubernetes-deployment.git'
       }
     }
-    stage('Build image') {
-      steps{
-        script {
-          dockerImage = docker.build dockerimagename
-        }
-      }
-    }
-    stage('Pushing Image') {
-      environment {
-          registryCredential = 'dockerhub-credentials'
-           }
-      steps{
-        script {
-          docker.withRegistry( 'https://registry.hub.docker.com', registryCredential ) {
-            dockerImage.push("latest")
-          }
-        }
-      }
-    }
-    stage('Deploying React.js container to Kubernetes') {
+
+    stage('Build & Push Docker Image (Kaniko)') {
       steps {
         script {
-          kubernetesDeploy(configs: "deployment.yaml", 
-                                         "service.yaml")
+          sh """
+          /kaniko/executor \
+            --context ${WORKSPACE} \
+            --dockerfile ${WORKSPACE}/Dockerfile \
+            --destination ${FULL_IMAGE} \
+            --cleanup
+          """
+        }
+      }
+    }
+
+    stage('Deploy to Kubernetes') {
+      steps {
+        script {
+          kubernetesDeploy(
+            configs: "deployment.yaml,service.yaml",
+            kubeconfigId: "kubeconfig"
+          )
         }
       }
     }
