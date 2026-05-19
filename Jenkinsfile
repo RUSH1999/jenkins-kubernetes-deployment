@@ -7,7 +7,8 @@ pipeline {
   stages {
     stage('Checkout Source') {
       steps {
-        git 'https://github.com/RUSH1999/jenkins-kubernetes-deployment.git'
+        git branch: 'main',
+            url: 'https://github.com/RUSH1999/jenkins-kubernetes-deployment.git'
       }
     }
     stage('Build image') {
