@@ -1,68 +1,133 @@
+// ─────────────────────────────────────────────────────────────────
+//  Jenkinsfile  —  React App CI/CD Pipeline
+//  Repo   : https://github.com/RUSH1999/jenkins-kubernetes-deployment
+//  Image  : rupeshyad27/react-app
+// ─────────────────────────────────────────────────────────────────
+
 pipeline {
-    agent any
-    
+
+    agent any   // run on any available Jenkins agent
+
+    // ── Configurable variables ────────────────────────────────────
     environment {
-        DOCKER_REPO   = 'rupeshyad27/react-app'
-        IMAGE_TAG     = "${BUILD_NUMBER}"
-        DOCKER_CRED   = 'docker-hub-credentials' // Must match the ID created in Jenkins Credentials
+        DOCKER_IMAGE   = 'rupeshyad27/react-app'
+        DOCKER_TAG     = "${BUILD_NUMBER}"          // unique per build
+        DOCKER_LATEST  = "${DOCKER_IMAGE}:latest"
+        DOCKER_VERSIONED = "${DOCKER_IMAGE}:${DOCKER_TAG}"
+        // 'dockerhub-creds' is a Username/Password credential stored
+        // in Jenkins → Manage Jenkins → Credentials
+        DOCKER_CREDS   = credentials('dockerhub-creds')
+        K8S_DEPLOYMENT = 'k8s-deployment.yaml'
+        K8S_SERVICE    = 'k8s-service.yaml'
     }
-    
+
+    // ── Pipeline options ──────────────────────────────────────────
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 30, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+
+    // ── Trigger: poll GitHub every 2 minutes  ─────────────────────
+    triggers {
+        pollSCM('H/2 * * * *')
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     stages {
-        stage('Clone Repository') {
+
+        // ── 1. Checkout ───────────────────────────────────────────
+        stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/RUSH1999/jenkins-kubernetes-deployment.git'
+                echo "Checking out branch: ${env.BRANCH_NAME}"
+                git url: 'https://github.com/RUSH1999/jenkins-kubernetes-deployment.git',
+                    branch: 'main'
             }
         }
-        
-        stage('Build Docker Image') {
+
+        // ── 2. Install deps & run tests ───────────────────────────
+        stage('Install & Test') {
             steps {
-                script {
-                    echo "Building minimized multi-stage Docker image on port 3000..."
-                    sh "docker build -t ${DOCKER_REPO}:${IMAGE_TAG} ."
-                    sh "docker build -t ${DOCKER_REPO}:latest ."
-                }
+                sh 'npm ci --prefer-offline'
+                // Uncomment if you have tests:
+                // sh 'npm test -- --watchAll=false --passWithNoTests'
             }
         }
-        
-        stage('Push to Registry') {
+
+        // ── 3. Build Docker image ─────────────────────────────────
+        stage('Docker Build') {
             steps {
-                script {
-                    // Authenticate and securely push images to Docker Hub
-                    withCredentials([usernamePassword(credentialsId: "${DOCKER_CRED}", passwordVariable: 'DOCKER_PASS', usernameVariable: 'DOCKER_USER')]) {
-                        sh "echo \$DOCKER_PASS | docker login -u \$DOCKER_USER --password-stdin"
-                        sh "docker push ${DOCKER_REPO}:${IMAGE_TAG}"
-                        sh "docker push ${DOCKER_REPO}:latest"
-                    }
-                }
+                sh """
+                    docker build \
+                        -t ${DOCKER_VERSIONED} \
+                        -t ${DOCKER_LATEST} \
+                        .
+                """
             }
         }
-        
+
+        // ── 4. Push to Docker Hub ─────────────────────────────────
+        stage('Docker Push') {
+            steps {
+                sh """
+                    echo "${DOCKER_CREDS_PSW}" | \
+                        docker login -u "${DOCKER_CREDS_USR}" --password-stdin
+                    docker push ${DOCKER_VERSIONED}
+                    docker push ${DOCKER_LATEST}
+                    docker logout
+                """
+            }
+        }
+
+        // ── 5. Update image tag in deployment YAML ────────────────
+        stage('Update K8s Manifest') {
+            steps {
+                sh """
+                    sed -i 's|${DOCKER_IMAGE}:.*|${DOCKER_VERSIONED}|g' \
+                        ${K8S_DEPLOYMENT}
+                """
+            }
+        }
+
+        // ── 6. Deploy to Kubernetes ───────────────────────────────
         stage('Deploy to Kubernetes') {
             steps {
-                script {
-                    echo "Dynamically updating 'BUILD_NUMBER' placeholder to tag ${IMAGE_TAG}..."
-                    // Automatically replaces the string BUILD_NUMBER with the actual build count inside the manifest
-                    sh "sed -i 's/BUILD_NUMBER/${IMAGE_TAG}/g' k8s-deployment.yaml"
-                    
-                    echo "Applying manifest changes to Kubernetes cluster..."
-                    sh "kubectl apply -f k8s-deployment.yaml"
-                }
+                sh """
+                    kubectl apply -f ${K8S_SERVICE}
+                    kubectl apply -f ${K8S_DEPLOYMENT}
+                    kubectl rollout status deployment/react-app \
+                        --timeout=120s
+                """
             }
         }
-        
-        stage('Verify Deployment') {
+
+        // ── 7. Verify deployment ──────────────────────────────────
+        stage('Verify') {
             steps {
-                // Ensure the pods successfully transition to a running state
-                sh "kubectl rollout status deployment/react-app-deployment"
-                sh "kubectl get services react-app-service"
+                sh """
+                    kubectl get pods -l app=react-app
+                    kubectl get svc react-app-service
+                """
             }
         }
-    }
-    
+
+    } // end stages
+
+    // ═══════════════════════════════════════════════════════════════
     post {
+        success {
+            echo "✅  Build #${BUILD_NUMBER} deployed successfully."
+            // Optional: add Slack/email notification here
+        }
+        failure {
+            echo "❌  Build #${BUILD_NUMBER} failed. Check logs above."
+        }
         always {
-            echo "Cleaning up build workspace to preserve storage space..."
-            sh "docker rmi ${DOCKER_REPO}:${IMAGE_TAG} ${DOCKER_REPO}:latest || true"
+            // Clean up local Docker images to save disk space
+            sh """
+                docker rmi ${DOCKER_VERSIONED} || true
+                docker rmi ${DOCKER_LATEST}    || true
+            """
         }
     }
 }

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: react-app-service
+  namespace: default
+  labels:
+    app: react-app
+spec:
+  type: NodePort          # Use LoadBalancer if running on a cloud provider
+  selector:
+    app: react-app
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80            # Service port
+      targetPort: 80      # Container port
+      nodePort: 30080     # Access via <NodeIP>:30080  (range 30000-32767)
