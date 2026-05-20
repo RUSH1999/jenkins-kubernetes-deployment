@@ -49,3 +49,4 @@ spec:
             periodSeconds: 20
       # Pull from Docker Hub (public image — no secret needed)
       # If private, add: imagePullSecrets: [{name: dockerhub-secret}]
+      #Deployment file

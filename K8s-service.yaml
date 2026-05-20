@@ -15,3 +15,5 @@ spec:
       port: 80            # Service port
       targetPort: 80      # Container port
       nodePort: 30080     # Access via <NodeIP>:30080  (range 30000-32767)
+
+#service file
