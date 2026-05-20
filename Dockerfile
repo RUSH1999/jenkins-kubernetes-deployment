@@ -1,15 +1,22 @@
-FROM node:19-alpine3.16
+# Stage 1: Build the React application
+FROM node:20-alpine AS build
+WORKDIR /app
 
-WORKDIR /react-app
+# Install dependencies using npm ci (clean install for speed & reliability)
+COPY package.json package-lock.json ./
+RUN npm ci
 
-COPY package.json .
-
-COPY package-lock.json .
-
+# Copy source and build static distribution files
 COPY . .
+RUN npm run build
 
-RUN npm install
+# Stage 2: Serve using an ultra-lightweight Nginx engine
+FROM nginx:1.25-alpine AS production
+
+ENV PORT=3000
+
+# Copy custom configuration if needed, otherwise copy files directly to default path
+COPY --from=build /app/build /usr/share/nginx/html
 
 EXPOSE 3000
-
-CMD ["npm", "start"]
+CMD ["nginx", "-g", "daemon off;"]
