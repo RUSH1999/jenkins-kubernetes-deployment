@@ -70,8 +70,8 @@ pipeline {
         stage('Deploy to Kubernetes') {
             steps {
                 sh """
-                    kubectl apply -f ${K8S_SERVICE}
-                    kubectl apply -f ${K8S_DEPLOYMENT}
+                    kubectl apply -f k8s-service.yaml --validate=false
+                    kubectl apply -f k8s-deployment.yaml --validate=false
                     kubectl rollout status deployment/react-app --timeout=120s
                 """
             }
@@ -85,6 +85,8 @@ pipeline {
                 """
             }
         }
+
+
 
     }
 
